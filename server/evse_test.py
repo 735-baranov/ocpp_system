@@ -10,6 +10,16 @@ from ocpp.v201.enums import RegistrationStatusType
 
 logging.basicConfig(level=logging.INFO)
 
+from aiohttp import web
+import socketio
+import asyncio
+
+from concurrent.futures import ProcessPoolExecutor
+
+queue = asyncio.Queue()  # create queue object
+sio = socketio.AsyncServer(engineio_logger=True, cors_allowed_origins='*')
+app = web.Application()
+sio.attach(app)
 
 class ChargePoint(cp):
     @on('BootNotification')
@@ -61,5 +71,37 @@ async def main():
     logging.info("WebSocket Server Started")
     await server.wait_closed()
 
-if __name__ == '__main__':
+async def handle_index(request):
+    # sio.emit('ask', 'some data')
+    response = await queue.get()  # block until there is something in the queue
+    return web.Response(response, content_type='text/plain')
+
+
+@sio.on('connect', namespace='/chat')
+def connect(sid, environ):
+    print("connect ", sid)
+
+@sio.on('answer', namespace='/chat')
+async def answer(sid, data):
+    await queue.put(data)  # push the response data to the queue
+
+@sio.on('disconnect', namespace='/chat')
+def disconnect(sid):
+    print('disconnect ', sid)
+
+app.add_routes([web.get('/', handle_index)])
+
+def do_websocket():
     asyncio.run(main())
+    
+def do_socketio():
+    web.run_app(app)
+    
+if __name__ == '__main__':
+    
+    executor = ProcessPoolExecutor(2)
+    loop = asyncio.new_event_loop()
+    boo = loop.run_in_executor(executor, do_websocket)
+    baa = loop.run_in_executor(executor, do_socketio)
+
+    loop.run_forever()
